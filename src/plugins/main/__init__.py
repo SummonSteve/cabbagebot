@@ -1,112 +1,89 @@
+import nonebot
 from nonebot import on_command
+from nonebot.typing import T_State
 from nonebot.adapters.cqhttp import Bot, Event
 from nonebot.adapters.cqhttp import MessageSegment
 from nonebot.rule import to_me
 from nonebot.log import logger
-from ._http import get_ys_info, get_account_info, get_abyss_info, post_bbsReward
-from .genshin import draw_pic
-from .db import search_user_by_qq
-from .ys_data_parser import parse_raw_data, prase_user_info
-from .download_err import get_err_pic
+from .db import get_user_by, add_user, create_table
+from sqlite3 import OperationalError
+from ._http import get_account_info
+from .ys_data_parser import prase_user_info
+from .draw_img import start_draw
 
 
-genshin = on_command("stat", rule=None, priority=3, aliases=set(['statme']))
-genshinReward = on_command("签到", rule=to_me(), priority=5)
-Genshinsign = on_command("绑定", rule=to_me(), priority=7, aliases=set(['sign']))
-GenshinChars = on_command("avainfo", rule=to_me(), priority=7)
+driver: nonebot.Driver = nonebot.get_driver()
+config: nonebot.config.Config = nonebot.get_driver().config
 
 
-async def try_draw_img(rawData):
-    try:
-        im_b64 = await draw_pic(rawData)
-    except IOError as f:
-        print(f.filename[8:16])
-        await get_err_pic(rawData['info']['region'], rawData['info']['game_role_id'], f.filename[8:16])
-        await genshin.finish('素材文件缺失，已加入下载队列，请稍后重新使用命令')
-        im_b64 = None
-    return im_b64
+@driver.on_startup
+async def check_db():
+    db_type = config.genshindb
+    if db_type == 'sqlite' or db_type == 'mysql':
+        try:
+            await get_user_by("account_id", config.genshin_account)
+            logger.info(f'started genshin plugin with account {config.genshin_account}')
+        except OperationalError:
+            await create_table()
 
 
+genshin_stat = on_command("asdf", rule=None, priority=3, block=True)
 
 
-@genshin.handle()
-async def handle_first_receive(bot: Bot, event: Event, state: dict):
-    try:
-        args = str(event.message).strip()
-        if args:
-            state['account_id'] = args
-            bbsInfoData = await get_account_info(state['account_id'])
-            bbsInfo = prase_user_info(bbsInfoData)
-            try:
-                state['region'] = bbsInfo['region']
-                state['game_role_id'] = bbsInfo['game_role_id']
-            except TypeError:
-                await genshin.finish('没这个人')
-            ysInfoData = await get_ys_info(state['region'], state['game_role_id'])
-            ysAbyssData = await get_abyss_info(state['region'], state['game_role_id'], 2)
-            rawData = await parse_raw_data(bbsInfoData, ysInfoData, ysAbyssData, event.sender['user_id'])
-            rawData['ava_flag'] = 0
-            im_b64 = await try_draw_img(rawData)
-            pic_message = MessageSegment.image(f'base64://{im_b64}')
-            await genshin.finish(pic_message)
-        else:
+@genshin_stat.handle()
+async def handle_all(bot: Bot, event: Event, state: T_State):
+    args = str(event.get_message()).strip()
+    sender = event.sender.user_id
+    self_user = await get_user_by("user_id", sender)
 
-            user_data = search_user_by_qq(event.sender['user_id'])
-            if user_data:
-                state['user_id'] = str(event.sender['user_id'])
-                state['game_role_id'] = str(user_data[1])
-                state['game_name'] = user_data[0]
-                state['user_name'] = user_data[3]
-                state['account_id'] = str(user_data[4])
-                state['cookie_token'] = user_data[5]
-                state['region'] = user_data[6]
-                state['is_login'] = True
-
-                await bot.send(event,f'已绑定用户：{state["game_name"]}\n米游社ID:{state["account_id"]}')
-                bbsInfoData = await get_account_info(state['account_id'])
-                ysInfoData = await get_ys_info(state['region'], state['game_role_id'])
-                ysAbyssData = await get_abyss_info(state['region'], state['game_role_id'], 2)
-                rawData = await parse_raw_data(bbsInfoData, ysInfoData, ysAbyssData, event.sender['user_id'])
-                rawData['ava_flag'] = 1
-                im_b64 = await try_draw_img(rawData)
+    if args and args != 'me':
+        if 'CQ:at' in args:
+            at_user_id = str.split(str.split(args, 'qq=')[1], ']')[0]
+            at_user_info = await get_user_by("user_id", at_user_id)
+            if at_user_info:
+                if at_user_info['cookie_token'] != '':
+                    is_login = True
+                else:
+                    is_login = False
+                im_b64 =  await start_draw(at_user_info, is_login, user_id=at_user_id)
                 pic_message = MessageSegment.image(f'base64://{im_b64}')
-
-                await genshin.finish(pic_message)
+                await genshin_stat.finish(pic_message)
             else:
-                logger.info('no such user in db')
-    except TypeError as f:
-        await genshin.finish(f'fatal error msg:{f.with_traceback} 如检查命令参数无误请将这个错误反馈给开发者')
+                await genshin_stat.finish('查询用户未绑定')
+        else:
+            stat_user_info = await get_user_by("account_id", args)
+            if not stat_user_info:
+                account_info = prase_user_info(await get_account_info(args))
+                db_data = (account_info['game_name'], 
+                            account_info['game_role_id'], 
+                            sender,
+                            event.sender.nickname,
+                            args,
+                            '', 
+                            account_info['region'])
+                await add_user(db_data)
+            else:
+                if stat_user_info['cookie_token'] != '':
+                    is_login = True
+                else:
+                    is_login = False
+                im_b64 =  await start_draw(stat_user_info, is_login, user_id=sender)
+                pic_message = MessageSegment.image(f'base64://{im_b64}')
+                await genshin_stat.finish(pic_message)
+
+    elif args == 'me':
+        stat_user_info = await get_user_by("user_id", sender)
+        if stat_user_info:
+            if stat_user_info['cookie_token'] != '':
+                is_login = True
+            else:
+                is_login = False
+            im_b64 =  await start_draw(stat_user_info, is_login, user_id=sender)
+            pic_message = MessageSegment.image(f'base64://{im_b64}')
+            await genshin_stat.finish(pic_message)
+        else:
+            await genshin_stat.finish('未绑定，请使用/stat <id>')
 
 
-@genshin.got("account_id", prompt='未绑定\n请输入米游社ID')
-async def handle_unlogin(bot: Bot, event: Event, state: dict):
-    try:
-        bbsInfoData = await get_account_info(state['account_id'])
-        bbsInfo = prase_user_info(bbsInfoData)
-        state['region'] = bbsInfo['region']
-        state['game_role_id'] = bbsInfo['game_role_id']
-        ysInfoData = await get_ys_info(state['region'], state['game_role_id'])
-        ysAbyssData = await get_abyss_info(state['region'], state['game_role_id'], 2)
-        rawData = await parse_raw_data(bbsInfoData, ysInfoData, ysAbyssData, event.sender['user_id'])
-        rawData['ava_flag'] = 1
-        im_b64 = await try_draw_img(rawData)
-        pic_message = MessageSegment.image(f'base64://{im_b64}')
-    except BaseException as f:
-        pic_message = None
-        await genshin.finish(f'fatal error msg:{f} 如检查命令参数无误请将这个错误反馈给开发者')
-    await genshin.finish(pic_message)
-
-@genshinReward.handle()
-async def handle_reward(bot: Bot, event: Event, state: dict):
-    user_data = search_user_by_qq(event.sender['user_id'])
-    if user_data:
-        info = await post_bbsReward(user_data[4], user_data[1], user_data[6], user_data[5])
-        info = (f'游戏昵称: {user_data[0]}\n状态消息：' + info["message"])
     else:
-        info = '未绑定'
-
-    await genshinReward.finish(info)
-
-@GenshinChars.handle()
-async def handle_char_info(bot: Bot, event: Event, state: dict):
-    pass
+        await genshin_stat.finish('缺少参数\n米游社ID或已绑定用户')

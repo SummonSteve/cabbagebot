@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import time
 from io import BytesIO
 from base64 import b64encode
-from .qq_avatar import get_qq_profile_pic
+from .avatar import get_qq_profile_pic
 
 def circle_corner(radimg, radii):
         circle = Image.new('L', (radii * 2, radii * 2), 0)
@@ -56,10 +56,11 @@ async def draw_pic(raw_data):
 
     text_draw = ImageDraw.Draw(img_canvas)
 
-    if raw_data['ava_flag'] == 1:
+    if raw_data['ava_type'] == 1:
         ava_img = Image.open(await get_qq_profile_pic(raw_data['sender_qq'])).resize((127, 127), Image.BILINEAR)
     else:
         ava_img = Image.open('./texture2d/default_ava.png').resize((127, 127), Image.BILINEAR)
+
     ava_holder = Image.open('./texture2d/ba.png').resize((200, 200), Image.BILINEAR)
     id_img = Image.open("./texture2d/level.png").resize((250, 155), Image.BILINEAR).convert("RGBA")
     level_img = Image.open("./texture2d/level2.png").resize((180, 180), Image.BILINEAR).convert("RGBA")
@@ -159,8 +160,8 @@ async def draw_pic(raw_data):
         abyss_char4_img = Image.open(abyss_char4).convert("RGBA").resize((70, 70), Image.BILINEAR)
         img_canvas.paste(abyss_char1_img, (60, 945), abyss_char1_img)
         img_canvas.paste(abyss_char2_img, (130, 945), abyss_char2_img)
-        img_canvas.paste(abyss_char3_img, (200, 945), abyss_char2_img)
-        img_canvas.paste(abyss_char4_img, (270, 945), abyss_char2_img)
+        img_canvas.paste(abyss_char3_img, (200, 945), abyss_char3_img)
+        img_canvas.paste(abyss_char4_img, (270, 945), abyss_char4_img)
 
         abyss_floor = raw_data['abyss']['abyss_floor']
         abyss_current_star = raw_data['abyss']['abyss_current_star']

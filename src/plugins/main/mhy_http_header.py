@@ -3,10 +3,12 @@ import time
 import random
 import string
 import uuid
+import nonebot
 
+config: nonebot.config.Config = nonebot.get_driver().config
 
-cookie_token = 'XA6FfYpPwcyDhj6gpjToicMXeDPYEOPkl6D6wbsT'
-bot_cookie = f'account_id=73247611;cookie_token={cookie_token}'
+cookie_token = config.bot_genshin_cookie
+bot_cookie = f'account_id={config.genshin_account};cookie_token={cookie_token}'
 
 def md5(text):
     md5 = hashlib.md5()
