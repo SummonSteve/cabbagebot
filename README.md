@@ -6,6 +6,9 @@
 
 更多功能制作中（忙其他的，咕了）
 
+结构太乱，决定重写
+
+https://github.com/SummonSteve/cabbagechan
  
 
 # screehshot
